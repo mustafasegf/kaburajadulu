@@ -125,11 +125,8 @@ async function main() {
   client.on("voiceStateUpdate", async (oldState, newState) => {
     if (oldState.member?.user.bot) return;
     // we want to check if there's any user joined a particular vc, if yes then create a new one, then move that member there.
-    // if there's no user in the vc, then delete the vc
-
     if (newState.channel?.id === "835174090398236725") {
       // create a new vc
-
       const channel = await newState.guild.channels.create({
         name: "new-general",
         type: ChannelType.GuildVoice,
@@ -145,7 +142,20 @@ async function main() {
 
       // move the member to the new vc
       newState.member?.voice.setChannel(channel);
+
+      return
     }
+
+    
+    // check if the event is in ids
+    // if yes, then check if the channel is empty. if yes, then delete the channel
+    if (oldState.channel?.id === ids[oldState.member!.id]?.id) {
+      if (oldState.channel?.members.size === 0) {
+        await oldState.channel.delete();
+      }
+    }
+
+
   });
 
   client.on("error", (error: Error) => {
