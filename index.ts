@@ -5,6 +5,7 @@ import {
   ChatInputCommandInteraction,
   Client,
   GatewayIntentBits,
+  MessageFlags,
   Partials,
   PermissionFlagsBits,
   VoiceChannel,
@@ -36,8 +37,9 @@ export type CommandContext = {
   client: Client;
 };
 
-// i want a way to tell which vc is the button for creating new channel.
-//
+const db: Record<string, { channel: string; category: string }> = {};
+const ids: Record<string, VoiceChannel> = {};
+
 const commands: Commands[] = [
   {
     name: "ping",
@@ -50,45 +52,51 @@ const commands: Commands[] = [
     name: "configure",
     description:
       "configure on which channel should the bot create new voice channels",
-    // options: [
-    //   {
-    //     name: "channel",
-    //     description:
-    //       "The channel where the bot should create new voice channels",
-    //     type: ApplicationCommandOptionType.Channel,
-    //     required: true,
-    //   },
-    //   {
-    //     name: "category",
-    //     description:
-    //       "The category where the bot should create new voice channels",
-    //     type: ApplicationCommandOptionType.Channel,
-    //     required: true,
-    //   },
-    // ],
+    options: [
+      {
+        name: "channel",
+        description:
+          "The channel where the bot should create new voice channels",
+        type: ApplicationCommandOptionType.Channel,
+        required: true,
+      },
+      {
+        name: "category",
+        description:
+          "The category where the bot should create new voice channels",
+        type: ApplicationCommandOptionType.Channel,
+        required: true,
+      },
+    ],
     run: async ({ interaction }) => {
-      // const channel = interaction.options.getChannel("channel")!;
-      // const category = interaction.options.getChannel("category")!;
-      // // need to filter out if the channel isnt a voice channel
-      // if (channel.type !== ChannelType.GuildVoice) {
-      //   await interaction.reply({
-      //     content: "Please provide a voice channel",
-      //     ephemeral: true,
-      //   });
-      //   return;
-      // }
-      //
-      // if (category.type !== ChannelType.GuildCategory) {
-      //   await interaction.reply({
-      //     content: "Please provide a category channel",
-      //     ephemeral: true,
-      //   });
-      //   return;
-      // }
-      //
-      // console.log({ channel: channel.name, category: category.name });
+      const channel = interaction.options.getChannel("channel")!;
+      const category = interaction.options.getChannel("category")!;
+      // need to filter out if the channel isnt a voice channel
+      if (channel.type !== ChannelType.GuildVoice) {
+        await interaction.reply({
+          content: "Please provide a voice channel",
+          flags: [MessageFlags.Ephemeral],
+        });
+        return;
+      }
 
-      await interaction.reply("Configured!");
+      if (category.type !== ChannelType.GuildCategory) {
+        await interaction.reply({
+          content: "Please provide a category channel",
+          flags: [MessageFlags.Ephemeral],
+        });
+        return;
+      }
+
+      db[interaction.guildId!] = {
+        channel: channel.id,
+        category: category.id,
+      };
+
+      await interaction.reply({
+        content: "Configured!",
+        flags: [MessageFlags.Ephemeral],
+      });
     },
   },
 ];
@@ -113,23 +121,16 @@ async function main() {
     }
   });
 
-  // client.on("messageCreate", async (interaction) => {
-  //   if (interaction.author.bot) return;
-  //   if (interaction.content === "ping") {
-  //     await interaction.reply("Pong!");
-  //   }
-  // });
-
-  const ids: Record<string, VoiceChannel> = {};
-
   client.on("voiceStateUpdate", async (oldState, newState) => {
     if (oldState.member?.user.bot) return;
     // we want to check if there's any user joined a particular vc, if yes then create a new one, then move that member there.
-    if (newState.channel?.id === "835174090398236725") {
+    // check from const db
+    if (db[newState.guild.id] !== undefined) {
       // create a new vc
       const channel = await newState.guild.channels.create({
-        name: "new-general",
+        name: `${newState.member!.user.username}'s Channel`,
         type: ChannelType.GuildVoice,
+        parent: db[newState.guild.id].category,
         permissionOverwrites: [
           {
             id: newState.member!.id,
@@ -143,10 +144,9 @@ async function main() {
       // move the member to the new vc
       newState.member?.voice.setChannel(channel);
 
-      return
+      return;
     }
 
-    
     // check if the event is in ids
     // if yes, then check if the channel is empty. if yes, then delete the channel
     if (oldState.channel?.id === ids[oldState.member!.id]?.id) {
@@ -154,8 +154,6 @@ async function main() {
         await oldState.channel.delete();
       }
     }
-
-
   });
 
   client.on("error", (error: Error) => {
