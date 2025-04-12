@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 // Servers table to store server configuration
 export const servers = sqliteTable("servers", {
@@ -33,11 +33,10 @@ export const stageUsers = sqliteTable("stage_users", {
   totalTimeMs: integer("total_time_ms").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-}, (table) => {
-  return {
-    userSessionIdx: primaryKey({ columns: [table.userId, table.sessionId] })
-  };
-});
+}, (table) => [
+  index("stage_user_index").on(table.userId, table.sessionId),
+]
+);
 
 // User roles
 export const userRoles = sqliteTable("user_roles", {
