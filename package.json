@@ -2,13 +2,25 @@
   "name": "kaburajadulu",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "dev": "bun --watch run src/index.ts",
+    "generate": "drizzle-kit generate",
+    "migrate": "bun run ./src/db.ts",
+    "start": "bun dist/index.js",
+    "build": "bun build --entry src/index.ts --outdir dist",
+    "compile": "bun build src/index.ts --compile --outfile lecounter",
+    "studio": "bun drizzle-kit studio"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "better-sqlite3": "^11.9.1",
+    "drizzle-kit": "^0.30.6"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "discord.js": "^14.18.0"
+    "discord.js": "^14.18.0",
+    "drizzle-orm": "^0.41.0"
   }
 }
