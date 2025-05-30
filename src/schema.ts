@@ -1,19 +1,20 @@
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
-// Servers table to store server configuration
-export const servers = sqliteTable("servers", {
-  id: text("id").primaryKey(), // Server/Guild ID
-  channelId: text("channel_id"),
-  categoryId: text("category_id"),
+export const channels = sqliteTable("channels", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id").notNull(),
+  serverId: text("server_id").notNull(),
+  serverName: text("server_name").notNull(),
+  channelName: text("channel_name").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// Stage sessions table
 export const stageSessions = sqliteTable("stage_sessions", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), // Unique session ID
-  stageId: text("stage_id").notNull(), // Discord Stage ID
-  startTime: integer("start_time", { mode: "timestamp" }).notNull(),
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()), // TODO: change to ulid or uuidv7
+  serverId: text("server_id").notNull(),
+  channelId: text("channel_id").notNull(),
+  startTime: integer("start_time", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   endTime: integer("end_time", { mode: "timestamp" }),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   uniqueUserCount: integer("unique_user_count").notNull().default(0),
@@ -21,13 +22,13 @@ export const stageSessions = sqliteTable("stage_sessions", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
-// User participation records
 export const stageUsers = sqliteTable("stage_users", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   sessionId: text("session_id").notNull()
     .references(() => stageSessions.id, { onDelete: "cascade" }),
-  userId: text("user_id").notNull(), // Discord user ID
+  userId: text("user_id").notNull(),
   username: text("username").notNull(),
+  displayname: text("name").notNull(),
   joinTime: integer("join_time", { mode: "timestamp" }).notNull(),
   leaveTime: integer("leave_time", { mode: "timestamp" }),
   totalTimeMs: integer("total_time_ms").notNull().default(0),
@@ -35,24 +36,4 @@ export const stageUsers = sqliteTable("stage_users", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("stage_user_index").on(table.userId, table.sessionId),
-]
-);
-
-// User roles
-export const userRoles = sqliteTable("user_roles", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  stageUserId: text("stage_user_id").notNull()
-    .references(() => stageUsers.id, { onDelete: "cascade" }),
-  roleName: text("role_name").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-});
-
-// Timeline data points
-export const timelinePoints = sqliteTable("timeline_points", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  sessionId: text("session_id").notNull()
-    .references(() => stageSessions.id, { onDelete: "cascade" }),
-  timestamp: integer("timestamp", { mode: "timestamp" }).notNull(),
-  userCount: integer("user_count").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-});
+]);

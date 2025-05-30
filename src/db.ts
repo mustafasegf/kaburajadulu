@@ -2,8 +2,8 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Database } from "bun:sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import * as schema from "./schema";
-import { eq, and, isNull } from "drizzle-orm";
-import { type InferSelectModel, type InferInsertModel } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
+import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 
 const url = process.env.DATABASE_URL?.replace("file:./", "") || "sqlite.db";
 
@@ -11,9 +11,8 @@ const sqlite = new Database(url);
 export const db = drizzle(sqlite, { schema });
 migrate(db, { migrationsFolder: "./migration" });
 
-// Type definitions for our models
-export type Server = InferSelectModel<typeof schema.servers>;
-export type ServerInsert = InferInsertModel<typeof schema.servers>;
+export type Channel = InferSelectModel<typeof schema.channels>;
+export type ChannelInsert = InferInsertModel<typeof schema.channels>;
 
 export type StageSession = InferSelectModel<typeof schema.stageSessions>;
 export type StageSessionInsert = InferInsertModel<typeof schema.stageSessions>;
@@ -21,56 +20,65 @@ export type StageSessionInsert = InferInsertModel<typeof schema.stageSessions>;
 export type StageUser = InferSelectModel<typeof schema.stageUsers>;
 export type StageUserInsert = InferInsertModel<typeof schema.stageUsers>;
 
-export type UserRole = InferSelectModel<typeof schema.userRoles>;
-export type UserRoleInsert = InferInsertModel<typeof schema.userRoles>;
-
-export type TimelinePoint = InferSelectModel<typeof schema.timelinePoints>;
-export type TimelinePointInsert = InferInsertModel<typeof schema.timelinePoints>;
-
-// Server configuration functions
-export function createServer(props: ServerInsert) {
-  return db.insert(schema.servers)
+export function addChannel(props: ChannelInsert): Channel {
+  return db.insert(schema.channels)
     .values(props)
     .onConflictDoUpdate({
-      target: schema.servers.id,
+      target: schema.channels.id,
       set: {
-        channelId: props.channelId,
-        categoryId: props.categoryId,
-        updatedAt: new Date()
-      }
+        ...props,
+        updatedAt: new Date(),
+      },
     })
     .returning()
     .get();
 }
 
-export function getServer(serverId: string) {
-  return db.select().from(schema.servers).where(eq(schema.servers.id, serverId)).get();
+export function listChannelFromServerId(serverId: string): Channel[] {
+  return db
+    .select()
+    .from(schema.channels)
+    .where(eq(schema.channels.serverId, serverId))
+    .all();
 }
 
-// Stage session functions
-export function createStageSession(props: StageSessionInsert) {
+export function getChannelFromChannelAndServer(channelId: string, serverId: string): Channel | undefined {
+  return db
+    .select()
+    .from(schema.channels)
+    .where(
+      and(
+        eq(schema.channels.channelId, channelId),
+        eq(schema.channels.serverId, serverId),
+      )
+    ).get()
+}
+
+export function addStageSession(props: StageSessionInsert): StageSession {
   return db.insert(schema.stageSessions)
     .values(props)
+    .onConflictDoNothing()
     .returning()
     .get();
 }
 
-export function getActiveStageSession(stageId: string) {
+export function getActiveStageSession(channelId: string): StageSession | undefined {
   return db.select()
     .from(schema.stageSessions)
     .where(and(
-      eq(schema.stageSessions.stageId, stageId),
+      eq(schema.stageSessions.channelId, channelId),
       eq(schema.stageSessions.isActive, true)
     ))
+    .orderBy(desc(schema.stageSessions.startTime))
     .get();
 }
 
-export function endStageSession(sessionId: string, endTime: Date) {
+export function endStageSession(sessionId: string, endTime: Date): StageSession {
   return db.update(schema.stageSessions)
-    .set({ 
-      endTime, 
+    .set({
+      endTime,
       isActive: false,
-      updatedAt: new Date() 
+      updatedAt: new Date()
     })
     .where(eq(schema.stageSessions.id, sessionId))
     .returning()
@@ -79,21 +87,20 @@ export function endStageSession(sessionId: string, endTime: Date) {
 
 export function updateSessionUniqueUserCount(sessionId: string, count: number) {
   return db.update(schema.stageSessions)
-    .set({ 
+    .set({
       uniqueUserCount: count,
-      updatedAt: new Date() 
+      updatedAt: new Date()
     })
     .where(eq(schema.stageSessions.id, sessionId))
     .returning()
     .get();
 }
 
-// User participation tracking functions
 export function upsertStageUser(props: StageUserInsert) {
   return db.insert(schema.stageUsers)
     .values(props)
     .onConflictDoUpdate({
-      target: schema.stageUsers.userSessionIdx,
+      target: [schema.stageUsers.userId, schema.stageUsers.sessionId],
       set: {
         joinTime: props.joinTime,
         leaveTime: props.leaveTime,
@@ -101,7 +108,6 @@ export function upsertStageUser(props: StageUserInsert) {
         updatedAt: new Date()
       }
     })
-    .returning()
     .get();
 }
 
@@ -124,10 +130,10 @@ export function getUsersForSession(sessionId: string) {
 
 export function markUserLeave(sessionId: string, userId: string, leaveTime: Date, totalTimeMs: number) {
   return db.update(schema.stageUsers)
-    .set({ 
-      leaveTime, 
+    .set({
+      leaveTime,
       totalTimeMs,
-      updatedAt: new Date() 
+      updatedAt: new Date()
     })
     .where(and(
       eq(schema.stageUsers.sessionId, sessionId),
@@ -137,43 +143,10 @@ export function markUserLeave(sessionId: string, userId: string, leaveTime: Date
     .get();
 }
 
-// Role tracking functions
-export function addUserRole(stageUserId: string, roleName: string) {
-  return db.insert(schema.userRoles)
-    .values({ stageUserId, roleName })
-    .onConflictDoNothing()
-    .returning()
-    .get();
-}
-
-export function getUserRoles(stageUserId: string) {
-  return db.select()
-    .from(schema.userRoles)
-    .where(eq(schema.userRoles.stageUserId, stageUserId))
-    .all();
-}
-
-// Timeline functions
-export function addTimelinePoint(sessionId: string, timestamp: Date, userCount: number) {
-  return db.insert(schema.timelinePoints)
-    .values({ sessionId, timestamp, userCount })
-    .returning()
-    .get();
-}
-
-export function getTimelinePoints(sessionId: string) {
-  return db.select()
-    .from(schema.timelinePoints)
-    .where(eq(schema.timelinePoints.sessionId, sessionId))
-    .orderBy(schema.timelinePoints.timestamp)
-    .all();
-}
-
-// Stats queries
 export function getAverageTimeSpent(sessionId: string) {
   const users = getUsersForSession(sessionId);
   if (users.length === 0) return 0;
-  
+
   const totalTime = users.reduce((sum, user) => sum + user.totalTimeMs, 0);
   return totalTime / users.length;
 }

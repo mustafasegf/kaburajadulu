@@ -1,7 +1,9 @@
-CREATE TABLE `servers` (
+CREATE TABLE `channels` (
 	`id` text PRIMARY KEY NOT NULL,
-	`channel_id` text,
-	`category_id` text,
+	`channel_id` text NOT NULL,
+	`server_id` text NOT NULL,
+	`server_name` text NOT NULL,
+	`channel_name` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL
 );
@@ -38,12 +40,4 @@ CREATE TABLE `timeline_points` (
 	`user_count` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`session_id`) REFERENCES `stage_sessions`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE TABLE `user_roles` (
-	`id` text PRIMARY KEY NOT NULL,
-	`stage_user_id` text NOT NULL,
-	`role_name` text NOT NULL,
-	`created_at` integer NOT NULL,
-	FOREIGN KEY (`stage_user_id`) REFERENCES `stage_users`(`id`) ON UPDATE no action ON DELETE cascade
 );
