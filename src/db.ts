@@ -62,11 +62,12 @@ export function addStageSession(props: StageSessionInsert): StageSession {
     .get();
 }
 
-export function getActiveStageSession(channelId: string): StageSession | undefined {
+export function getActiveStageSession(channelId: string, serverId: string): StageSession | undefined {
   return db.select()
     .from(schema.stageSessions)
     .where(and(
       eq(schema.stageSessions.channelId, channelId),
+      eq(schema.stageSessions.serverId, serverId),
       eq(schema.stageSessions.isActive, true)
     ))
     .orderBy(desc(schema.stageSessions.startTime))
@@ -111,6 +112,14 @@ export function upsertStageUser(props: StageUserInsert) {
     .get();
 }
 
+export function addStageUser(props: StageUserInsert) {
+  return db.insert(schema.stageUsers)
+    .values(props)
+    .onConflictDoNothing()
+    .returning()
+    .get()
+}
+
 export function getStageUser(sessionId: string, userId: string) {
   return db.select()
     .from(schema.stageUsers)
@@ -121,32 +130,39 @@ export function getStageUser(sessionId: string, userId: string) {
     .get();
 }
 
-export function getUsersForSession(sessionId: string) {
+export function getUserForSession(sessionId: string, userId: string) {
   return db.select()
     .from(schema.stageUsers)
-    .where(eq(schema.stageUsers.sessionId, sessionId))
-    .all();
-}
-
-export function markUserLeave(sessionId: string, userId: string, leaveTime: Date, totalTimeMs: number) {
-  return db.update(schema.stageUsers)
-    .set({
-      leaveTime,
-      totalTimeMs,
-      updatedAt: new Date()
-    })
     .where(and(
       eq(schema.stageUsers.sessionId, sessionId),
-      eq(schema.stageUsers.userId, userId)
+      eq(schema.stageUsers.userId, userId),
     ))
-    .returning()
     .get();
 }
 
-export function getAverageTimeSpent(sessionId: string) {
-  const users = getUsersForSession(sessionId);
-  if (users.length === 0) return 0;
+export function markUserLeave(sessionId: string, userId: string, leaveTime: Date, totalTimeMs: number) {
+  return db.transaction(tx => {
 
-  const totalTime = users.reduce((sum, user) => sum + user.totalTimeMs, 0);
-  return totalTime / users.length;
+    const { uniqueUserCount } = tx.select({ uniqueUserCount: schema.stageSessions.uniqueUserCount })
+      .from(schema.stageSessions)
+      .where(eq(schema.stageSessions.id, sessionId))
+      .get() || { uniqueUserCount: 0 }
+
+    tx.update(schema.stageSessions)
+      .set({ uniqueUserCount: uniqueUserCount - 1 })
+      .execute()
+
+    return tx.update(schema.stageUsers)
+      .set({
+        leaveTime,
+        totalTimeMs,
+        updatedAt: new Date()
+      })
+      .where(and(
+        eq(schema.stageUsers.sessionId, sessionId),
+        eq(schema.stageUsers.userId, userId)
+      ))
+      .returning()
+      .get();
+  })
 }

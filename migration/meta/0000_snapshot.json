@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "565264d0-a211-4117-be23-040324483bac",
+  "id": "8c90519a-7f73-4597-a82e-ad0b43b708be",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "channels": {
@@ -73,8 +73,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "stage_id": {
-          "name": "stage_id",
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "channel_id": {
+          "name": "channel_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -162,6 +169,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "join_time": {
           "name": "join_time",
           "type": "integer",
@@ -207,71 +221,20 @@
             "session_id"
           ],
           "isUnique": false
+        },
+        "stage_users_user_id_session_id_unique": {
+          "name": "stage_users_user_id_session_id_unique",
+          "columns": [
+            "user_id",
+            "session_id"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
         "stage_users_session_id_stage_sessions_id_fk": {
           "name": "stage_users_session_id_stage_sessions_id_fk",
           "tableFrom": "stage_users",
-          "tableTo": "stage_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "timeline_points": {
-      "name": "timeline_points",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "timestamp": {
-          "name": "timestamp",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_count": {
-          "name": "user_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "timeline_points_session_id_stage_sessions_id_fk": {
-          "name": "timeline_points_session_id_stage_sessions_id_fk",
-          "tableFrom": "timeline_points",
           "tableTo": "stage_sessions",
           "columnsFrom": [
             "session_id"

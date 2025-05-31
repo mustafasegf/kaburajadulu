@@ -43,6 +43,7 @@ export type CommandContext = {
   client: Client;
 };
 
+// TODO: create command for remove config, add command to get statistic
 const commands: Commands[] = [
   {
     name: "ping",
@@ -309,124 +310,49 @@ const commands: Commands[] = [
   // }
 ];
 
-// Helper function to handle user joining stage
-// async function handleUserJoin(memberId: string, username: string, roles: string[]) {
-//   const now = new Date();
-//   
-//   // Check if we have an active session
-//   if (!activeSessionId) {
-//     // Create new session
-//     const session = dbService.createStageSession({
-//       stageId: STAGE_ID,
-//       startTime: now,
-//       isActive: true
-//     });
-//     
-//     activeSessionId = session.id;
-//     console.log(`Started new stage session: ${activeSessionId}`);
-//   }
-//   
-//   // Get or create user record
-//   const existingUser = dbService.getStageUser(activeSessionId, memberId);
-//   
-//   if (existingUser) {
-//     // User rejoining - update join time
-//     dbService.upsertStageUser({
-//       id: existingUser.id,
-//       userId: memberId,
-//       username,
-//       sessionId: activeSessionId,
-//       joinTime: now,
-//       leaveTime: null,
-//       totalTimeMs: existingUser.totalTimeMs
-//     });
-//   } else {
-//     // New user
-//     const user = dbService.upsertStageUser({
-//       userId: memberId,
-//       username,
-//       sessionId: activeSessionId,
-//       joinTime: now,
-//       totalTimeMs: 0
-//     });
-//     
-//     // Save user roles
-//     for (const roleName of roles) {
-//       dbService.addUserRole(user.id, roleName);
-//     }
-//     
-//     // Update unique user count
-//     const users = dbService.getUsersForSession(activeSessionId);
-//     dbService.updateSessionUniqueUserCount(activeSessionId, users.length);
-//   }
-//   
-//   // Add timeline point
-//   const activeUsers = dbService.db
-//     .select()
-//     .from(dbService.db.schema.stageUsers)
-//     .where(dbService.and(
-//       dbService.eq(dbService.db.schema.stageUsers.sessionId, activeSessionId),
-//       dbService.isNull(dbService.db.schema.stageUsers.leaveTime)
-//     ))
-//     .all();
-//     
-//   dbService.addTimelinePoint(activeSessionId, now, activeUsers.length);
-// }
-
-// Helper function to handle user leaving stage
-// async function handleUserLeave(memberId: string) {
-//   if (!activeSessionId) return;
-//   
-//   const now = new Date();
-//   
-//   // Get user record
-//   const user = dbService.getStageUser(activeSessionId, memberId);
-//   
-//   if (user && !user.leaveTime) {
-//     // Calculate time spent in this session
-//     const joinTime = new Date(user.joinTime).getTime();
-//     const leaveTime = now.getTime();
-//     const sessionTimeMs = leaveTime - joinTime;
-//     const totalTimeMs = user.totalTimeMs + sessionTimeMs;
-//     
-//     // Update user record
-//     dbService.markUserLeave(activeSessionId, memberId, now, totalTimeMs);
-//     
-//     // Add timeline point
-//     const activeUsers = dbService.db
-//       .select()
-//       .from(dbService.db.schema.stageUsers)
-//       .where(dbService.and(
-//         dbService.eq(dbService.db.schema.stageUsers.sessionId, activeSessionId),
-//         dbService.isNull(dbService.db.schema.stageUsers.leaveTime)
-//       ))
-//       .all();
-//     
-//     dbService.addTimelinePoint(activeSessionId, now, activeUsers.length - 1);
-//     
-//     // If everyone left, end the session
-//     if (activeUsers.length <= 1) {
-//       dbService.endStageSession(activeSessionId, now);
-//       console.log(`Ended stage session: ${activeSessionId}`);
-//       activeSessionId = null;
-//     }
-//   }
-// }
 
 async function handleStageActivity(oldState: VoiceState, newState: VoiceState, channel: dbService.Channel) {
   const channelId = oldState.channelId || newState.channelId!;
-  const serverId = oldState.guild.id || newState.guild.id;
+  const ch = oldState.channel || newState.channel!
+  const guild = oldState.guild || newState.guild;
+  const member = oldState.member || newState.member!
 
-  const session = dbService.addStageSession({
-    channelId,
-    serverId,
-  })
+  const joined = !oldState.channelId
 
-  // 2. create/get user
-  //
-  // 3. update session count
-  //
-  // 4. if last user, end session
+  const msg = joined ? "joined to" : "left from"
+
+  console.log(member.user.displayName, msg, ch.name, "from", guild.name)
+
+  // TODO: put all of this into a tx
+  let session = dbService.getActiveStageSession(channelId, guild.id)
+  if (!session) {
+    session = dbService.addStageSession({
+      channelId: ch.id,
+      serverId: guild.id,
+      uniqueUserCount: 0,
+    })
+  }
+
+  let user = dbService.getUserForSession(session.id, member.user.id)
+  if (!user) {
+    user = dbService.addStageUser({
+      sessionId: session.id,
+      userId: member.id,
+      username: member.user.username,
+      displayname: member.user.displayName,
+      joinTime: new Date(),
+    })
+  }
+
+  const now = new Date()
+  if (joined) {
+    dbService.updateSessionUniqueUserCount(session.id, session.uniqueUserCount + 1)
+  } else {
+    if (session.uniqueUserCount <= 0) {
+      dbService.endStageSession(session.id, now)
+    }
+    dbService.markUserLeave(session.id, member.user.id, new Date(), now.getTime() - user.joinTime.getTime())
+  }
 }
 
 async function main() {

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, unique } from "drizzle-orm/sqlite-core";
 
 export const channels = sqliteTable("channels", {
   id: text("id").primaryKey(),
@@ -36,4 +36,5 @@ export const stageUsers = sqliteTable("stage_users", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("stage_user_index").on(table.userId, table.sessionId),
+  unique().on(table.userId, table.sessionId),
 ]);
