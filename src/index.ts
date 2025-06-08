@@ -15,6 +15,8 @@ import {
   type PermissionResolvable,
   Events,
   VoiceState,
+  type OmitPartialGroupDMChannel,
+  Message,
 } from "discord.js";
 import * as dbService from "./db";
 
@@ -26,6 +28,7 @@ export const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers, // Needed to get member roles
+    GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Channel],
 });
@@ -100,6 +103,48 @@ const commands: Commands[] = [
 
       await interaction.reply({
         content,
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  },
+  {
+    name: "sticky",
+    description: "setup a sticky messge for this channel",
+    defaultMemberPermissions: ["ManageChannels"],
+    options: [
+      {
+        name: "message",
+        description:
+          "The sticky message",
+        type: ApplicationCommandOptionType.String,
+        required: true,
+      }
+    ],
+    run: async ({ interaction }) => {
+      const message = interaction.options.getString("message")!;
+
+      const channel = interaction.guild?.channels.cache.get(interaction.channelId)
+      if (!channel || !channel.isSendable()) {
+        await interaction.reply({
+          content: "Someting is wrong",
+          flags: [MessageFlags.Ephemeral],
+        })
+        return
+      }
+
+      const res = await channel.send(message)
+
+      dbService.addStickyMessage({
+        channelId: interaction.channelId,
+        serverName: interaction.guild!.name,
+        serverId: interaction.guildId || "unknown",
+        // @ts-ignore
+        channelName: interaction!.channel!.name || "unknown",
+        lastMessageId: res.id,
+        message
+      })
+      await interaction.reply({
+        content: "Sticky Message Successfully Configured",
         flags: [MessageFlags.Ephemeral],
       })
     },
@@ -355,6 +400,26 @@ async function handleStageActivity(oldState: VoiceState, newState: VoiceState, c
   }
 }
 
+async function handleStickyMessage(event: OmitPartialGroupDMChannel<Message<boolean>>) {
+  const message = dbService.getStickyMessage(event.channelId, event.guildId!)
+  if (!message) return
+
+  const channel = event.guild?.channels.cache.get(event.channelId)
+  if (!channel || !channel.isSendable()) {
+    return
+  }
+
+  channel.messages.delete(message.lastMessageId)
+
+  const res = await channel.send(message.message)
+
+  dbService.updateStickyMessageLastId(
+    event.channelId,
+    event.guildId || "unknown",
+    res.id,
+  )
+}
+
 async function main() {
   client.on("ready", async (client) => {
     await client.application.commands.set(commands);
@@ -386,6 +451,12 @@ async function main() {
 
     handleStageActivity(oldState, newState, channel)
   });
+
+  client.on(Events.MessageCreate, async (message) => {
+    if (message.author.bot) return;
+
+    handleStickyMessage(message)
+  })
 
   client.on("error", (error: Error) => {
     console.error("Unexpected error while logging into Discord.");

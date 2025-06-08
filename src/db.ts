@@ -20,6 +20,9 @@ export type StageSessionInsert = InferInsertModel<typeof schema.stageSessions>;
 export type StageUser = InferSelectModel<typeof schema.stageUsers>;
 export type StageUserInsert = InferInsertModel<typeof schema.stageUsers>;
 
+export type StickyMessage = InferSelectModel<typeof schema.stickyMessage>;
+export type StickyMessageInsert = InferInsertModel<typeof schema.stickyMessage>;
+
 export function addChannel(props: ChannelInsert): Channel {
   return db.insert(schema.channels)
     .values(props)
@@ -165,4 +168,41 @@ export function markUserLeave(sessionId: string, userId: string, leaveTime: Date
       .returning()
       .get();
   })
+}
+
+export function addStickyMessage(props: StickyMessageInsert) {
+  return db.insert(schema.stickyMessage)
+    .values(props)
+    .onConflictDoUpdate({
+      target: schema.stickyMessage.id,
+      set: {
+        ...props,
+        updatedAt: new Date(),
+      },
+    })
+    .returning()
+    .get()
+}
+
+export function getStickyMessage(channelId: string, serverId: string): StickyMessage | undefined {
+  return db.select()
+    .from(schema.stickyMessage)
+    .where(and(
+      eq(schema.stickyMessage.channelId, channelId),
+      eq(schema.stickyMessage.serverId, serverId),
+    ))
+    .get()
+}
+
+export function updateStickyMessageLastId(channelId: string, serverId: string, lastMessageId: string) {
+  return db.update(schema.stickyMessage)
+    .set({
+      lastMessageId
+    })
+    .where(and(
+      eq(schema.stickyMessage.channelId, channelId),
+      eq(schema.stickyMessage.serverId, serverId),
+    ))
+    .returning()
+    .get();
 }

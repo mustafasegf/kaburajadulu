@@ -38,3 +38,15 @@ export const stageUsers = sqliteTable("stage_users", {
   index("stage_user_index").on(table.userId, table.sessionId),
   unique().on(table.userId, table.sessionId),
 ]);
+
+export const stickyMessage = sqliteTable("sticky_message", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  channelId: text("channel_id").notNull(),
+  serverId: text("server_id").notNull(),
+  serverName: text("server_name").notNull(),
+  channelName: text("channel_name").notNull(),
+  message: text("message").notNull(),
+  lastMessageId: text("last_message_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
