@@ -1,0 +1,1 @@
+CREATE INDEX `channelid_serverid_index` ON `sticky_message` (`channel_id`,`server_id`);

@@ -132,6 +132,12 @@ const commands: Commands[] = [
         return
       }
 
+      const oldSticky = dbService.getStickyMessage(interaction.channelId, interaction.guildId || "unknown")
+      if (oldSticky) {
+        channel.messages.delete(oldSticky.lastMessageId)
+        dbService.deleteStickyMessage(interaction.channelId, interaction.guildId || "unknown")
+      }
+
       const res = await channel.send(message)
 
       dbService.addStickyMessage({
@@ -149,6 +155,32 @@ const commands: Commands[] = [
       })
     },
   },
+  {
+    name: "deletesticky",
+    description: "delete the sticky messge for this channel",
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+
+      const channel = interaction.guild?.channels.cache.get(interaction.channelId)
+      if (!channel || !channel.isSendable()) {
+        await interaction.reply({
+          content: "Someting is wrong",
+          flags: [MessageFlags.Ephemeral],
+        })
+        return
+      }
+
+      dbService.deleteStickyMessage(
+        interaction.channelId,
+        interaction.guildId || "unknown",
+      )
+
+      await interaction.reply({
+        content: "Sticky Message Successfully Deleted",
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  }
   // {
   //   name: "stage-stats",
   //   description: "Get statistics about the tracked stage",

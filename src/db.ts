@@ -206,3 +206,14 @@ export function updateStickyMessageLastId(channelId: string, serverId: string, l
     .returning()
     .get();
 }
+
+export function deleteStickyMessage(channelId: string, serverId: string) {
+  return db
+    .delete(schema.stickyMessage)
+    .where(and(
+      eq(schema.stickyMessage.channelId, channelId),
+      eq(schema.stickyMessage.serverId, serverId),
+    ))
+    .returning()
+    .get()
+}

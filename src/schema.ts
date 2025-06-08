@@ -49,4 +49,7 @@ export const stickyMessage = sqliteTable("sticky_message", {
   lastMessageId: text("last_message_id").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
-});
+}, (table) => [
+  index("channelid_serverid_index").on(table.channelId, table.serverId),
+]
+);
