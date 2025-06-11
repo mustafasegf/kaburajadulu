@@ -19,6 +19,8 @@ import {
   Message,
 } from "discord.js";
 import * as dbService from "./db";
+import pino from "pino";
+import { bucket } from "./utils";
 
 // Client setup with required intents
 export const client = new Client({
@@ -45,6 +47,12 @@ export type CommandContext = {
   interaction: ChatInputCommandInteraction<CacheType>;
   client: Client;
 };
+
+const logger = pino({
+  transport: {
+    target: 'pino-pretty'
+  },
+})
 
 // TODO: create command for remove config, add command to get statistic
 const commands: Commands[] = [
@@ -206,9 +214,12 @@ const commands: Commands[] = [
       const message = interaction.options.getString("message")!;
 
       if ("members" in role) {
-        const users = Array.from(role.members.values())
+        await interaction!.guild!.members!.fetch()
 
-        const content = "Sending message: " + message
+        const users = Array.from(role.members.values())
+        const content = "Sending message: " + message + "\n to " + users.length + " users"
+
+        const scheduler = bucket(50, 1_000)
 
         await interaction.reply({
           content,
@@ -216,7 +227,11 @@ const commands: Commands[] = [
         })
 
         for (const user of users) {
-          user.send(message)
+          scheduler(
+            () => user.send(message)
+              .then(_msg => logger.info(`Successfully sent message to ${user.displayName} (${user.user.username})`))
+              .catch(err => logger.error(err))
+          )
         }
 
         return
@@ -241,7 +256,7 @@ async function handleStageActivity(oldState: VoiceState, newState: VoiceState, c
 
   const msg = joined ? "joined to" : "left from"
 
-  console.log(member.user.displayName, msg, ch.name, "from", guild.name)
+  logger.info(`${member.user.displayName} ${msg} ${ch.name} from ${guild.name}`)
 
   // TODO: put all of this into a tx
   let session = dbService.getActiveStageSession(channelId, guild.id)
@@ -300,7 +315,7 @@ async function main() {
     await client.application.commands.set(commands);
 
     const { username, tag } = client.user;
-    console.log(`Bot has been logged in as ${username} (${tag})!`);
+    logger.info(`Bot has been logged in as ${username} (${tag})!`)
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -310,7 +325,7 @@ async function main() {
       try {
         await command?.run({ interaction, client });
       } catch (e) {
-        console.error(e);
+        logger.error(e)
       }
     }
   });
@@ -334,12 +349,12 @@ async function main() {
   })
 
   client.on("error", (error: Error) => {
-    console.error("Unexpected error while logging into Discord.");
-    console.error(error);
+    logger.error("Unexpected error while logging into Discord.");
+    logger.error(error);
     return;
   });
 
   client.login(process.env.DC_TOKEN);
 }
 
-Promise.allSettled([main()]).catch((e) => console.error(e));
+Promise.allSettled([main()]).catch((e) => logger.error(e));
