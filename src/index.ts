@@ -17,6 +17,7 @@ import {
   VoiceState,
   type OmitPartialGroupDMChannel,
   Message,
+  GuildMember,
 } from "discord.js";
 import * as dbService from "./db";
 import pino from "pino";
@@ -219,7 +220,7 @@ const commands: Commands[] = [
         const users = Array.from(role.members.values())
         const content = "Sending message: " + message + "\n to " + users.length + " users"
 
-        const scheduler = bucket(50, 1_000)
+        const scheduler = bucket(10, 1_000)
 
         await interaction.reply({
           content,
