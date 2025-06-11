@@ -145,7 +145,7 @@ const commands: Commands[] = [
         serverName: interaction.guild!.name,
         serverId: interaction.guildId || "unknown",
         // @ts-ignore
-        channelName: interaction!.channel!.name || "unknown",
+        channelName: interaction!.channel?.name || "unknown",
         lastMessageId: res.id,
         message
       })
@@ -180,211 +180,54 @@ const commands: Commands[] = [
         flags: [MessageFlags.Ephemeral],
       })
     },
-  }
-  // {
-  //   name: "stage-stats",
-  //   description: "Get statistics about the tracked stage",
-  //   options: [
-  //     {
-  //       name: "channel",
-  //       description: "The channel to send stats to",
-  //       type: ApplicationCommandOptionType.Channel,
-  //       required: true
-  //     },
-  //     {
-  //       name: "session",
-  //       description: "Session ID (leave empty for current/latest session)",
-  //       type: ApplicationCommandOptionType.String,
-  //       required: false
-  //     }
-  //   ],
-  //   run: async ({ interaction }) => {
-  //     const channel = interaction.options.getChannel("channel") as TextChannel;
-  //     const sessionId = interaction.options.getString("session") || activeSessionId;
-  //     
-  //     if (channel.type !== ChannelType.GuildText) {
-  //       await interaction.reply({
-  //         content: "Please provide a text channel",
-  //         flags: [MessageFlags.Ephemeral],
-  //       });
-  //       return;
-  //     }
-  //     
-  //     await interaction.deferReply({ ephemeral: true });
-  //     
-  //     if (!sessionId) {
-  //       await interaction.editReply("No active stage session found.");
-  //       return;
-  //     }
-  //     
-  //     // Get session data
-  //     const session = dbService.db
-  //       .select()
-  //       .from(dbService.db.schema.stageSessions)
-  //       .where(dbService.eq(dbService.db.schema.stageSessions.id, sessionId))
-  //       .get();
-  //     
-  //     if (!session) {
-  //       await interaction.editReply(`No session found with ID: ${sessionId}`);
-  //       return;
-  //     }
-  //     
-  //     // Get user data
-  //     const users = dbService.getUsersForSession(sessionId);
-  //     
-  //     if (users.length === 0) {
-  //       await interaction.editReply("No user data available for this session.");
-  //       return;
-  //     }
-  //     
-  //     // Calculate average time spent (in minutes)
-  //     const totalTimeSpent = users.reduce((sum, user) => sum + user.totalTimeMs, 0);
-  //     const avgTimeSpentMinutes = users.length > 0 
-  //       ? Math.round((totalTimeSpent / users.length) / 60000 * 10) / 10 
-  //       : 0;
-  //     
-  //     // Sort users by time spent
-  //     const userTimeData = users.map(user => ({
-  //       id: user.id,
-  //       userId: user.userId,
-  //       username: user.username,
-  //       timeMinutes: Math.round(user.totalTimeMs / 60000 * 10) / 10
-  //     })).sort((a, b) => b.timeMinutes - a.timeMinutes);
-  //     
-  //     // Create stats embed
-  //     const statsEmbed = new EmbedBuilder()
-  //       .setTitle("Stage Activity Statistics")
-  //       .setDescription(`Stats for Stage ID: ${STAGE_ID}`)
-  //       .setColor(0x0099FF)
-  //       .addFields(
-  //         { name: 'Total Unique Users', value: session.uniqueUserCount.toString(), inline: true },
-  //         { name: 'Average Time Spent', value: `${avgTimeSpentMinutes} minutes`, inline: true },
-  //         { name: 'Session Status', value: session.isActive ? 'Active' : 'Ended', inline: true },
-  //         { name: 'Start Time', value: new Date(session.startTime).toLocaleString(), inline: true }
-  //       );
-  //       
-  //     if (session.endTime) {
-  //       statsEmbed.addFields({ 
-  //         name: 'End Time', 
-  //         value: new Date(session.endTime).toLocaleString(), 
-  //         inline: true 
-  //       });
-  //       
-  //       // Calculate total duration if ended
-  //       const durationMs = new Date(session.endTime).getTime() - new Date(session.startTime).getTime();
-  //       const durationMinutes = Math.round(durationMs / 60000 * 10) / 10;
-  //       statsEmbed.addFields({ 
-  //         name: 'Total Duration', 
-  //         value: `${durationMinutes} minutes`, 
-  //         inline: true 
-  //       });
-  //     }
-  //     
-  //     // Top 10 users by time spent
-  //     if (userTimeData.length > 0) {
-  //       const topUsers = userTimeData.slice(0, 10).map(u => `${u.username}: ${u.timeMinutes} min`).join('\n');
-  //       statsEmbed.addFields({ name: 'Top Users by Time Spent', value: topUsers || 'No data' });
-  //     }
-  //     
-  //     statsEmbed.setTimestamp();
-  //     
-  //     // Send stats to the specified channel
-  //     await channel.send({ embeds: [statsEmbed] });
-  //     
-  //     // Generate a text file with all user data
-  //     let userDataText = "Username,Roles,Time Spent (minutes)\n";
-  //     
-  //     // Process each user
-  //     for (const user of users) {
-  //       // Get roles for this user
-  //       const roles = dbService.getUserRoles(user.id);
-  //       const roleNames = roles.map(r => r.roleName).join('; ');
-  //       const timeMinutes = Math.round(user.totalTimeMs / 60000 * 10) / 10;
-  //       
-  //       userDataText += `${user.username},${roleNames},${timeMinutes}\n`;
-  //     }
-  //     
-  //     // Send the user data as a file
-  //     await channel.send({
-  //       content: "Detailed user participation data:",
-  //       files: [{
-  //         attachment: Buffer.from(userDataText),
-  //         name: `stage_users_${sessionId}.csv`
-  //       }]
-  //     });
-  //     
-  //     // Generate timeline data for graph
-  //     const timelinePoints = dbService.getTimelinePoints(sessionId);
-  //     
-  //     if (timelinePoints.length > 0) {
-  //       let timelineData = "Time,UserCount\n";
-  //       const startTime = new Date(session.startTime).getTime();
-  //       
-  //       timelinePoints.forEach(point => {
-  //         const minutesSinceStart = Math.round((new Date(point.timestamp).getTime() - startTime) / 60000 * 10) / 10;
-  //         timelineData += `${minutesSinceStart},${point.userCount}\n`;
-  //       });
-  //       
-  //       await channel.send({
-  //         content: "Timeline data for graphing user participation:",
-  //         files: [{
-  //           attachment: Buffer.from(timelineData),
-  //           name: `stage_timeline_${sessionId}.csv`
-  //         }]
-  //       });
-  //     }
-  //     
-  //     await interaction.editReply(`Statistics for session ${sessionId} have been sent to the specified channel.`);
-  //   }
-  // },
-  // {
-  //   name: "reset-stage-tracking",
-  //   description: "End current stage tracking session and start a new one",
-  //   defaultMemberPermissions: PermissionFlagsBits.Administrator,
-  //   run: async ({ interaction }) => {
-  //     // End current session if active
-  //     if (activeSessionId) {
-  //       dbService.endStageSession(activeSessionId, new Date());
-  //       activeSessionId = null;
-  //     }
-  //     
-  //     await interaction.reply({
-  //       content: "Stage tracking session has been ended. A new session will start when users join the stage.",
-  //       flags: [MessageFlags.Ephemeral],
-  //     });
-  //   }
-  // },
-  // {
-  //   name: "list-sessions",
-  //   description: "List all stage tracking sessions",
-  //   run: async ({ interaction }) => {
-  //     const sessions = dbService.db
-  //       .select()
-  //       .from(dbService.db.schema.stageSessions)
-  //       .where(dbService.eq(dbService.db.schema.stageSessions.stageId, STAGE_ID))
-  //       .orderBy(dbService.db.schema.stageSessions.startTime, "desc")
-  //       .all();
-  //     
-  //     if (sessions.length === 0) {
-  //       await interaction.reply({
-  //         content: "No stage sessions found.",
-  //         flags: [MessageFlags.Ephemeral],
-  //       });
-  //       return;
-  //     }
-  //     
-  //     const sessionList = sessions.map((session, index) => {
-  //       const startTime = new Date(session.startTime).toLocaleString();
-  //       const endTime = session.endTime ? new Date(session.endTime).toLocaleString() : "Active";
-  //       return `${index + 1}. ID: \`${session.id}\` - Start: ${startTime} - End: ${endTime} - Users: ${session.uniqueUserCount}`;
-  //     }).join('\n');
-  //     
-  //     await interaction.reply({
-  //       content: `**Stage Sessions**\n${sessionList}`,
-  //       flags: [MessageFlags.Ephemeral],
-  //     });
-  //   }
-  // }
+  },
+  {
+    name: "dm",
+    description: "dm a message to all the roles",
+    defaultMemberPermissions: ["ManageChannels"],
+    options: [
+      {
+        name: "role",
+        description:
+          "The role",
+        type: ApplicationCommandOptionType.Role,
+        required: true,
+      },
+      {
+        name: "message",
+        description:
+          "The sticky message",
+        type: ApplicationCommandOptionType.String,
+        required: true,
+      }
+    ],
+    run: async ({ interaction }) => {
+      const role = interaction.options.getRole("role")!;
+      const message = interaction.options.getString("message")!;
+
+      if ("members" in role) {
+        const users = Array.from(role.members.values())
+
+        const content = "Sending message: " + message
+
+        await interaction.reply({
+          content,
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        for (const user of users) {
+          user.send(message)
+        }
+
+        return
+      }
+
+      await interaction.reply({
+        content: "Role isn't a user role",
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  },
 ];
 
 
