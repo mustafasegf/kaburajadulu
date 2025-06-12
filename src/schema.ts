@@ -53,3 +53,18 @@ export const stickyMessage = sqliteTable("sticky_message", {
   index("channelid_serverid_index").on(table.channelId, table.serverId),
 ]
 );
+
+export const auditLog = sqliteTable("audit_log", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  channelId: text("channel_id").notNull(),
+  channelName: text("channel_name").notNull(),
+  serverId: text("server_id").notNull(),
+  serverName: text("server_name").notNull(),
+  command: text("command").notNull(),
+  action: text("action", { mode: "json" }),
+  userId: text("user_id").notNull(),
+  username: text("username").notNull(),
+  displayname: text("name").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+})

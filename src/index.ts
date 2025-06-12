@@ -20,8 +20,12 @@ import {
   GuildMember,
 } from "discord.js";
 import * as dbService from "./db";
+import { db } from "./db"
+import * as schema from "./schema";
+
 import pino from "pino";
 import { bucket } from "./utils";
+import { and, desc, eq } from "drizzle-orm";
 
 // Client setup with required intents
 export const client = new Client({
@@ -65,9 +69,9 @@ const commands: Commands[] = [
     },
   },
   {
-    name: "configure",
+    name: "track",
     description:
-      "Configure on which channel should the bot create new voice channels",
+      "Configure on which channel should the bot track user activity",
     options: [
       {
         name: "channel",
@@ -158,6 +162,21 @@ const commands: Commands[] = [
         lastMessageId: res.id,
         message
       })
+
+      db.insert(schema.auditLog).values({
+        channelId: interaction.channelId,
+        // @ts-ignore
+        channelName: interaction?.channel?.name || "unknown",
+        serverId: interaction.guildId || "unknown",
+        serverName: interaction.guild!.name,
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayname: interaction.user.displayName,
+        command: interaction.commandName,
+        action: { channel: channel.name, message },
+      }).onConflictDoNothing()
+        .execute()
+
       await interaction.reply({
         content: "Sticky Message Successfully Configured",
         flags: [MessageFlags.Ephemeral],
@@ -183,6 +202,19 @@ const commands: Commands[] = [
         interaction.channelId,
         interaction.guildId || "unknown",
       )
+
+      db.insert(schema.auditLog).values({
+        channelId: interaction.channelId,
+        // @ts-ignore
+        channelName: interaction?.channel?.name || "unknown",
+        serverId: interaction.guildId || "unknown",
+        serverName: interaction.guild!.name,
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayname: interaction.user.displayName,
+        command: interaction.commandName,
+      }).onConflictDoNothing()
+        .execute()
 
       await interaction.reply({
         content: "Sticky Message Successfully Deleted",
@@ -227,6 +259,21 @@ const commands: Commands[] = [
           flags: [MessageFlags.Ephemeral],
         })
 
+        // TODO: create utils to extract common guikd and server info
+        db.insert(schema.auditLog).values({
+          channelId: interaction.channelId,
+          // @ts-ignore
+          channelName: interaction?.channel?.name || "unknown",
+          serverId: interaction.guildId || "unknown",
+          serverName: interaction.guild!.name,
+          userId: interaction.user.id,
+          username: interaction.user.username,
+          displayname: interaction.user.displayName,
+          command: interaction.commandName,
+          action: { role: role.name, message },
+        }).onConflictDoNothing()
+          .execute()
+
         for (const user of users) {
           scheduler(
             () => user.send(message)
@@ -240,6 +287,39 @@ const commands: Commands[] = [
 
       await interaction.reply({
         content: "Role isn't a user role",
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  },
+  // TODO: make audit log pagination with button
+  {
+    name: "audit",
+    description: "Check the audit log of what command being run",
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+      const logs = db.select().from(schema.auditLog)
+        .where(
+          and(
+            eq(schema.auditLog.channelId, interaction.channelId),
+            eq(schema.auditLog.serverId, interaction.guildId || "unknown"),
+          )
+        )
+        .orderBy(desc(schema.auditLog.createdAt)).all()
+
+      if (logs.length === 0) {
+        logger.debug("No audit log available")
+        await interaction.reply({
+          content: "No audit log available",
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        return
+      }
+
+      const content = logs.map((log, i) => `${i + 1}. ${log.displayname} (${log.username}) do \`${log.command}\` with ${JSON.stringify(log.action)} at ${log.createdAt}`).join('\n')
+
+      await interaction.reply({
+        content,
         flags: [MessageFlags.Ephemeral],
       })
     },
