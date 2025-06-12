@@ -36,7 +36,7 @@ export const stageUsers = sqliteTable("stage_users", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => [
   index("stage_user_index").on(table.userId, table.sessionId),
-  unique().on(table.userId, table.sessionId),
+  // unique().on(table.userId, table.sessionId),
 ]);
 
 export const stickyMessage = sqliteTable("sticky_message", {

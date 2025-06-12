@@ -18,6 +18,7 @@ import {
   type OmitPartialGroupDMChannel,
   Message,
   GuildMember,
+  type VoiceBasedChannel,
 } from "discord.js";
 import * as dbService from "./db";
 import { db } from "./db"
@@ -25,7 +26,7 @@ import * as schema from "./schema";
 
 import pino from "pino";
 import { bucket } from "./utils";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 
 // Client setup with required intents
 export const client = new Client({
@@ -84,13 +85,15 @@ const commands: Commands[] = [
     run: async ({ interaction }) => {
       const channel = interaction.options.getChannel("channel")!;
 
-      if (channel.type !== ChannelType.GuildStageVoice) {
+      if (channel.type !== ChannelType.GuildStageVoice && channel.type !== ChannelType.GuildVoice) {
         await interaction.reply({
           content: `Please provide a voice channel, the chael type are ${channel.type}`,
           flags: [MessageFlags.Ephemeral],
         });
         return;
       }
+
+      const chn = channel as VoiceBasedChannel
 
       dbService.addChannel({
         id: interaction.guildId!,
@@ -100,8 +103,133 @@ const commands: Commands[] = [
         channelName: channel.name || "unknown name",
       });
 
+      await interaction.guild?.channels.fetch()
+
+      const members = Array.from(chn?.members.values())
+
+      let session = dbService.getActiveStageSession(channel.id, interaction.guild!.id)
+      if (!session) {
+        session = dbService.addStageSession({
+          channelId: channel.id,
+          serverId: interaction.guild!.id,
+          uniqueUserCount: members.length,
+        })
+      }
+
+      if (members) {
+        for (const member of members.values()) {
+          dbService.addStageUser({
+            sessionId: session.id,
+            userId: member.id,
+            username: member.user.username,
+            displayname: member.user.displayName,
+            joinTime: new Date(),
+          })
+        }
+      }
+
+      db.insert(schema.auditLog).values({
+        channelId: interaction.channelId,
+        // @ts-ignore
+        channelName: interaction?.channel?.name || "unknown",
+        serverId: interaction.guildId || "unknown",
+        serverName: interaction.guild!.name,
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayname: interaction.user.displayName,
+        command: interaction.commandName,
+        action: { channel: channel.name },
+      }).onConflictDoNothing()
+        .execute()
+
       await interaction.reply({
         content: `Configured Channel ${channel.name} on server ${interaction.guild?.name}!`,
+        flags: [MessageFlags.Ephemeral],
+      });
+    },
+  },
+  {
+    name: "end-track",
+    description:
+      "End tracking session",
+    options: [
+      {
+        name: "channel",
+        description:
+          "The channel where the bot should create new voice channels",
+        type: ApplicationCommandOptionType.Channel,
+        required: true,
+      }
+    ],
+    run: async ({ interaction }) => {
+      const channel = interaction.options.getChannel("channel")!;
+
+      if (channel.type !== ChannelType.GuildStageVoice && channel.type !== ChannelType.GuildVoice) {
+        await interaction.reply({
+          content: `Please provide a voice channel, the chael type are ${channel.type}`,
+          flags: [MessageFlags.Ephemeral],
+        });
+        return;
+      }
+
+      const chn = channel as VoiceBasedChannel
+
+      await interaction.guild?.channels.fetch()
+
+      const members = Array.from(chn?.members.values())
+
+      let session = dbService.getActiveStageSession(channel.id, interaction.guild!.id)
+      if (!session) {
+        session = dbService.addStageSession({
+          channelId: channel.id,
+          serverId: interaction.guild!.id,
+          uniqueUserCount: members.length,
+        })
+      }
+
+      const dbMembers = db.select()
+        .from(schema.stageUsers)
+        .where(and(
+          eq(schema.stageUsers.sessionId, session.id),
+          isNull(schema.stageUsers.leaveTime)
+        )).all()
+
+      const memberMap: Record<string, dbService.StageUser> = {}
+
+      for (const member of dbMembers) {
+        memberMap[member.userId] = member
+      }
+
+      console.log(memberMap)
+
+      const now = new Date()
+      if (members) {
+        for (const member of members.values()) {
+          const dbMember = memberMap[member.id]
+          dbService.markUserLeave(session.id, member.user.id, new Date(), now.getTime() - dbMember.joinTime.getTime())
+        }
+      }
+
+      dbService.updateSessionUniqueUserCount(session.id, 0)
+      dbService.endStageSession(session.id, now)
+
+
+      db.insert(schema.auditLog).values({
+        channelId: interaction.channelId,
+        // @ts-ignore
+        channelName: interaction?.channel?.name || "unknown",
+        serverId: interaction.guildId || "unknown",
+        serverName: interaction.guild!.name,
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayname: interaction.user.displayName,
+        command: interaction.commandName,
+        action: { channel: channel.name },
+      }).onConflictDoNothing()
+        .execute()
+
+      await interaction.reply({
+        content: `Ended tracking on channel ${channel.name} on server ${interaction.guild?.name}!`,
         flags: [MessageFlags.Ephemeral],
       });
     },
@@ -332,6 +460,11 @@ async function handleStageActivity(oldState: VoiceState, newState: VoiceState, c
   const ch = oldState.channel || newState.channel!
   const guild = oldState.guild || newState.guild;
   const member = oldState.member || newState.member!
+  const ignoreEvent = oldState.channelId && newState.channelId // if both exist, then it's not leave nor join
+
+  if (ignoreEvent) {
+    return
+  }
 
   const joined = !oldState.channelId
 
@@ -367,7 +500,7 @@ async function handleStageActivity(oldState: VoiceState, newState: VoiceState, c
     if (session.uniqueUserCount <= 0) {
       dbService.endStageSession(session.id, now)
     }
-    dbService.markUserLeave(session.id, member.user.id, new Date(), now.getTime() - user.joinTime.getTime())
+    dbService.markUserLeave(session.id, member.user.id, now, now.getTime() - user.joinTime.getTime())
   }
 }
 

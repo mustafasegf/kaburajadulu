@@ -1,0 +1,1 @@
+DROP INDEX `stage_users_user_id_session_id_unique`;

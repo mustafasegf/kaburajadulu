@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Database } from "bun:sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import * as schema from "./schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 
 const url = process.env.DATABASE_URL?.replace("file:./", "") || "sqlite.db";
@@ -139,6 +139,7 @@ export function getUserForSession(sessionId: string, userId: string) {
     .where(and(
       eq(schema.stageUsers.sessionId, sessionId),
       eq(schema.stageUsers.userId, userId),
+      isNull(schema.stageUsers.leaveTime),
     ))
     .get();
 }
