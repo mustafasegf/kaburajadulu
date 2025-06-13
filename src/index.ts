@@ -19,6 +19,7 @@ import {
   Message,
   GuildMember,
   type VoiceBasedChannel,
+  AttachmentBuilder,
 } from "discord.js";
 import * as dbService from "./db";
 import { db } from "./db"
@@ -149,14 +150,14 @@ const commands: Commands[] = [
     },
   },
   {
-    name: "end-track",
+    name: "endtrack",
     description:
       "End tracking session",
     options: [
       {
         name: "channel",
         description:
-          "The channel where the bot should create new voice channels",
+          "The channel where the bot should end the tracking session",
         type: ApplicationCommandOptionType.Channel,
         required: true,
       }
@@ -206,6 +207,7 @@ const commands: Commands[] = [
       if (members) {
         for (const member of members.values()) {
           const dbMember = memberMap[member.id]
+          if (!dbMember) continue
           dbService.markUserLeave(session.id, member.user.id, new Date(), now.getTime() - dbMember.joinTime.getTime())
         }
       }
@@ -235,10 +237,21 @@ const commands: Commands[] = [
     },
   },
   {
-    name: "getconfig",
-    description: "Get configuration on this server",
+    name: "removetrack",
+    description: "Remove tracking on voice channel",
+    options: [
+      {
+        name: "channel",
+        description:
+          "The channel where the bot tracks",
+        type: ApplicationCommandOptionType.Channel,
+        required: true,
+      }
+    ],
     defaultMemberPermissions: ["ManageChannels"],
     run: async ({ interaction }) => {
+      const channel = interaction.options.getChannel("channel")!;
+
       const channels = dbService.listChannelFromServerId(interaction.guild!.id)
       const content = channels.map((channel, i) => `${i + 1}. ${channel.channelName}`).join("\n");
 
@@ -246,6 +259,119 @@ const commands: Commands[] = [
         content,
         flags: [MessageFlags.Ephemeral],
       })
+    },
+  },
+  {
+    name: "gettrack",
+    description: "Get configuration on this server",
+    options: [
+      {
+        name: "channel",
+        description:
+          "The channel where the bot check the statistics",
+        type: ApplicationCommandOptionType.Channel,
+        required: false,
+      }
+    ],
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+
+      const channel = interaction.options.getChannel("channel");
+      if (!channel) {
+        const channels = dbService.listChannelFromServerId(interaction.guild!.id)
+
+        if (channels.length === 0) {
+          await interaction.reply({
+            content: "No channel being tracked",
+            flags: [MessageFlags.Ephemeral],
+          })
+          return
+        }
+
+        const content = channels.map((channel, i) => `${i + 1}. ${channel.channelName}`).join("\n");
+
+        await interaction.reply({
+          content,
+          flags: [MessageFlags.Ephemeral],
+        })
+        return
+      }
+
+      const data = await db.query.stageSessions.findMany({
+        with: {
+          users: true,
+        },
+        orderBy: desc(schema.stageSessions.createdAt),
+        limit: 5,
+      });
+
+      function convertToCSV(sessions: typeof data) {
+        const headers = [
+          "Session ID",
+          "Server ID",
+          "Channel ID",
+          "Start Time",
+          "End Time",
+          "Is Active",
+          "Unique User Count",
+          "User ID",
+          "Username",
+          "Display Name",
+          "Join Time",
+          "Leave Time",
+          "Total Time (ms)"
+        ];
+
+        const rows = [headers.join(",")];
+
+        sessions.forEach(session => {
+          if (session.users.length === 0) {
+            // Session with no users
+            rows.push([
+              session.id,
+              session.serverId,
+              session.channelId,
+              session.startTime?.toISOString() || "",
+              session.endTime?.toISOString() || "",
+              session.isActive,
+              session.uniqueUserCount,
+              "", "", "", "", "", ""
+            ].join(","));
+          } else {
+            // Session with users
+            session.users.forEach(user => {
+              rows.push([
+                session.id,
+                session.serverId,
+                session.channelId,
+                session.startTime?.toISOString() || "",
+                session.endTime?.toISOString() || "",
+                session.isActive,
+                session.uniqueUserCount,
+                user.userId,
+                `"${user.username}"`, // Wrap in quotes for CSV safety
+                `"${user.displayname}"`,
+                user.joinTime?.toISOString() || "",
+                user.leaveTime?.toISOString() || "",
+                user.totalTimeMs
+              ].join(","));
+            });
+          }
+        });
+
+        return rows.join("\n");
+      }
+
+      const csvContent = convertToCSV(data);
+      const attachment = new AttachmentBuilder(Buffer.from(csvContent), {
+        name: `${channel.name}-session.csv`
+      });
+
+      await interaction.reply({
+        content: `Here are the last 5 stage sessions for ${channel.name}`,
+        files: [attachment],
+        flags: [MessageFlags.Ephemeral],
+      });
     },
   },
   {

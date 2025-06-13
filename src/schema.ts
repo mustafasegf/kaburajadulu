@@ -1,3 +1,4 @@
+import { relations } from "drizzle-orm";
 import { sqliteTable, text, integer, index, unique } from "drizzle-orm/sqlite-core";
 
 export const channels = sqliteTable("channels", {
@@ -38,6 +39,18 @@ export const stageUsers = sqliteTable("stage_users", {
   index("stage_user_index").on(table.userId, table.sessionId),
   // unique().on(table.userId, table.sessionId),
 ]);
+
+
+export const stageSessionsRelations = relations(stageSessions, ({ many }) => ({
+  users: many(stageUsers),
+}));
+
+export const stageUsersRelations = relations(stageUsers, ({ one }) => ({
+  session: one(stageSessions, {
+    fields: [stageUsers.sessionId],
+    references: [stageSessions.id],
+  }),
+}));
 
 export const stickyMessage = sqliteTable("sticky_message", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
