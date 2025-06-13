@@ -40,7 +40,6 @@ export const stageUsers = sqliteTable("stage_users", {
   // unique().on(table.userId, table.sessionId),
 ]);
 
-
 export const stageSessionsRelations = relations(stageSessions, ({ many }) => ({
   users: many(stageUsers),
 }));
@@ -78,6 +77,18 @@ export const auditLog = sqliteTable("audit_log", {
   userId: text("user_id").notNull(),
   username: text("username").notNull(),
   displayname: text("name").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+})
+
+export const schedule = sqliteTable("schedule", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  channelId: text("channel_id").notNull(),
+  channelName: text("channel_name").notNull(),
+  serverId: text("server_id").notNull(),
+  serverName: text("server_name").notNull(),
+  message: text("message").notNull(),
+  time: text("time").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 })

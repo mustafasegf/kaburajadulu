@@ -143,6 +143,8 @@ const commands: Commands[] = [
       }).onConflictDoNothing()
         .execute()
 
+      logger.info(`Start tracking on ${channel.name}`)
+
       await interaction.reply({
         content: `Configured Channel ${channel.name} on server ${interaction.guild?.name}!`,
         flags: [MessageFlags.Ephemeral],
@@ -230,6 +232,8 @@ const commands: Commands[] = [
       }).onConflictDoNothing()
         .execute()
 
+      logger.info(`Ended tracking on ${channel.name}`)
+
       await interaction.reply({
         content: `Ended tracking on channel ${channel.name} on server ${interaction.guild?.name}!`,
         flags: [MessageFlags.Ephemeral],
@@ -254,6 +258,8 @@ const commands: Commands[] = [
 
       const channels = dbService.listChannelFromServerId(interaction.guild!.id)
       const content = channels.map((channel, i) => `${i + 1}. ${channel.channelName}`).join("\n");
+
+      console.log(`Remove tracking from ${channel.name}`)
 
       await interaction.reply({
         content,
@@ -407,7 +413,7 @@ const commands: Commands[] = [
 
       const res = await channel.send(message)
 
-      dbService.addStickyMessage({
+      const sticky = dbService.addStickyMessage({
         channelId: interaction.channelId,
         serverName: interaction.guild!.name,
         serverId: interaction.guildId || "unknown",
@@ -431,6 +437,8 @@ const commands: Commands[] = [
       }).onConflictDoNothing()
         .execute()
 
+      logger.info(`Added sticky message on ${sticky?.channelName}`)
+
       await interaction.reply({
         content: "Sticky Message Successfully Configured",
         flags: [MessageFlags.Ephemeral],
@@ -452,7 +460,7 @@ const commands: Commands[] = [
         return
       }
 
-      dbService.deleteStickyMessage(
+      const sticky = dbService.deleteStickyMessage(
         interaction.channelId,
         interaction.guildId || "unknown",
       )
@@ -467,8 +475,11 @@ const commands: Commands[] = [
         username: interaction.user.username,
         displayname: interaction.user.displayName,
         command: interaction.commandName,
+        action: { channel: channel.name }
       }).onConflictDoNothing()
         .execute()
+
+      logger.info(`Deleted sticky message on ${sticky?.channelName}`)
 
       await interaction.reply({
         content: "Sticky Message Successfully Deleted",
@@ -528,6 +539,9 @@ const commands: Commands[] = [
         }).onConflictDoNothing()
           .execute()
 
+        // @ts-ignore
+        logger.info(`Ended tracking on ${interaction?.channel?.name || "unknown"}`)
+
         for (const user of users) {
           scheduler(
             () => user.send(message)
@@ -545,6 +559,282 @@ const commands: Commands[] = [
       })
     },
   },
+  {
+    name: "schedule",
+    description: "Add scheduled message",
+    options: [
+      {
+        name: "message",
+        description:
+          "The sticky message",
+        type: ApplicationCommandOptionType.String,
+        required: true,
+      },
+      {
+        name: "time",
+        description:
+          "Time of the day in 24h format",
+        type: ApplicationCommandOptionType.String,
+        required: true,
+      },
+      {
+        name: "channel",
+        description:
+          "The channel where the scheduled message is configured",
+        type: ApplicationCommandOptionType.Channel,
+        required: false,
+      },
+      // {
+      //   name: "Repeating",
+      //   description:
+      //     "Should the message repeat everyday",
+      //   type: ApplicationCommandOptionType.String,
+      //   required: false,
+      //   choices: [
+      //     { name: "Daily", value: "Daily" },
+      //     { name: "Weekly", value: "Weekly" },
+      //     // { name: "Monthly", value: "Monthly" },
+      //   ],
+      // }
+    ],
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+      const message = interaction.options.getString("message")!;
+      const time = interaction.options.getString("time")!;
+      const channel = interaction.options.getChannel("channel") || interaction.guild?.channels.cache.get(interaction.channelId)!;
+
+      if (!channel || "isSendable" in channel && !channel.isSendable()) {
+        await interaction.reply({
+          content: "Someting is wrong",
+          flags: [MessageFlags.Ephemeral],
+        })
+        return
+      }
+
+      // validate if the time is in 24h format
+      const HOURS_REGEX = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+      if (!HOURS_REGEX.test(time)) {
+        await interaction.reply({
+          content: "Invalid time format. Please use 24h format.",
+          flags: [MessageFlags.Ephemeral],
+        });
+        return;
+      }
+
+      const schedule = db.insert(schema.schedule)
+        .values({
+          channelId: interaction.channelId,
+          // @ts-ignore
+          channelName: channel?.name || "unknown",
+          serverId: interaction.guildId || "unknown",
+          serverName: interaction.guild!.name,
+          message,
+          time,
+        })
+        .returning()
+        .get()
+
+      db.insert(schema.auditLog).values({
+        channelId: interaction.channelId,
+        // @ts-ignore
+        channelName: interaction?.channel?.name || "unknown",
+        serverId: interaction.guildId || "unknown",
+        serverName: interaction.guild!.name,
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayname: interaction.user.displayName,
+        command: interaction.commandName,
+        action: { channel: channel.name, message },
+      }).onConflictDoNothing()
+        .execute()
+
+      logger.info(`Schedule message successfully configured on ${schedule.channelName}`)
+
+      await interaction.reply({
+        content: "Schedule Message Successfully Configured",
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  },
+  {
+    name: "getschedule",
+    description: "Get scheduled message",
+    options: [
+      {
+        name: "channel",
+        description:
+          "The channel where the scheduled message is configured",
+        type: ApplicationCommandOptionType.Channel,
+        required: false,
+      }
+    ],
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+      let channel = interaction.options.getChannel("message") || { id: interaction.channelId };
+
+      const schedules = db.select()
+        .from(schema.schedule)
+        .where(
+          and(
+            eq(schema.schedule.channelId, channel.id),
+            eq(schema.schedule.serverId, interaction.guildId || "unknown"),
+          )
+        )
+        .all()
+
+      if (schedules.length === 0) {
+        logger.debug("No schedule message available")
+        await interaction.reply({
+          content: "No schedule message available",
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        return
+      }
+
+      const content = schedules.map((schedule, i) => `${i + 1}. ${schedule.channelName} @(${schedule.time})\n${schedule.message}`).join('\n')
+
+      await interaction.reply({
+        content,
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  },
+  {
+    name: "getallschedule",
+    description: "Get all scheduled message in the server",
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+
+      const schedules = db.select()
+        .from(schema.schedule)
+        .where(
+          and(
+            eq(schema.schedule.serverId, interaction.guildId || "unknown"),
+          )
+        )
+        .all()
+
+      if (schedules.length === 0) {
+        logger.debug("No schedule message available")
+        await interaction.reply({
+          content: "No schedule message available",
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        return
+      }
+
+      const content = schedules.map((schedule, i) => `${i + 1}. ${schedule.channelName} @(${schedule.time})\n${schedule.message}`).join('\n')
+
+      await interaction.reply({
+        content,
+        flags: [MessageFlags.Ephemeral],
+      })
+    },
+  },
+  {
+    name: "deleteschedule",
+    description: "Delete scheduled message",
+    options: [
+      {
+        name: "channel",
+        description:
+          "The channel where the scheduled message is configured",
+        type: ApplicationCommandOptionType.Channel,
+        required: false,
+      },
+      {
+        name: "order",
+        description:
+          "Which schedule to delete. use /getschedule to check which schedule to available",
+        type: ApplicationCommandOptionType.Number,
+        required: false,
+      }
+    ],
+    defaultMemberPermissions: ["ManageChannels"],
+    run: async ({ interaction }) => {
+      const channel = interaction.options.getChannel("message") || { id: interaction.channelId, name: interaction.guild?.name };
+      const order = interaction.options.getNumber("order")
+
+      const schedules = db.select()
+        .from(schema.schedule)
+        .where(
+          and(
+            eq(schema.schedule.channelId, channel.id),
+            eq(schema.schedule.serverId, interaction.guildId || "unknown"),
+          )
+        )
+        .all()
+
+      if (schedules.length === 0) {
+        await interaction.reply({
+          content: "No schedule message available",
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        return
+      }
+
+      if (schedules.length > 1 && !order) {
+        await interaction.reply({
+          content: "There's more than one scheduled message on this channel. Please add order to the command",
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        return
+      }
+
+      if (order && order - 1 > schedules.length) {
+        await interaction.reply({
+          content: "Order is greater than the amount of scheduled message",
+          flags: [MessageFlags.Ephemeral],
+        })
+
+        return
+      }
+
+      const schedule = db.delete(schema.schedule)
+        .where(
+          and(
+            eq(schema.schedule.channelId, channel.id),
+            eq(schema.schedule.serverId, interaction.guildId || "unknown"),
+            eq(schema.schedule.id, schedules[(order || 1) - 1].id),
+          )
+        )
+        .returning()
+        .get()
+
+
+      db.insert(schema.auditLog).values({
+        channelId: interaction.channelId,
+        // @ts-ignore
+        channelName: interaction?.channel?.name || "unknown",
+        serverId: interaction.guildId || "unknown",
+        serverName: interaction.guild!.name,
+        userId: interaction.user.id,
+        username: interaction.user.username,
+        displayname: interaction.user.displayName,
+        command: interaction.commandName,
+        action: { channel: channel.name },
+      }).onConflictDoNothing()
+        .execute()
+
+      await interaction.reply({
+        content: `Deleted scheduled message on ${schedule?.channelName} @${schedule?.time}}`,
+        flags: [MessageFlags.Ephemeral],
+      })
+
+      const content = schedules.filter((_schedule, i) => i != ((order || 1) - 1)).map((schedule, i) => `${i + 1}. ${schedule.channelName} @(${schedule.time})\n${schedule.message}`).join('\n')
+
+      if (content) {
+        await interaction.reply({
+          content,
+          flags: [MessageFlags.Ephemeral],
+        })
+      }
+    },
+  },
   // TODO: make audit log pagination with button
   {
     name: "audit",
@@ -554,7 +844,6 @@ const commands: Commands[] = [
       const logs = db.select().from(schema.auditLog)
         .where(
           and(
-            eq(schema.auditLog.channelId, interaction.channelId),
             eq(schema.auditLog.serverId, interaction.guildId || "unknown"),
           )
         )
@@ -650,6 +939,47 @@ async function handleStickyMessage(event: OmitPartialGroupDMChannel<Message<bool
   )
 }
 
+function worker() {
+  logger.info("Worker started");
+  const currentTime = new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  logger.info(`Current time is ${currentTime}`);
+
+  // loop all settings in every minute. Check if the time is the same as the current time and send the message
+  setInterval(async () => {
+
+    const currentTime = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
+    const schedules = db
+      .select()
+      .from(schema.schedule)
+      .where(eq(schema.schedule.time, currentTime))
+      .all()
+
+    for (const schedule of schedules) {
+      const guild = await client.guilds.fetch(schedule.serverId);
+      const channel = await guild.channels.fetch(schedule.channelId);
+
+      if (!channel || !("send" in channel)) {
+        logger.warn(`Channel ${schedule.channelName} don't have send functionality`)
+
+        continue
+      }
+
+      channel.send(schedule.message)
+      logger.info(`Sending schedule message to ${schedule.channelName}`)
+    }
+
+  }, 60 * 1000);
+}
+
+
 async function main() {
   client.on("ready", async (client) => {
     await client.application.commands.set(commands);
@@ -697,4 +1027,4 @@ async function main() {
   client.login(process.env.DC_TOKEN);
 }
 
-Promise.allSettled([main()]).catch((e) => logger.error(e));
+Promise.allSettled([main(), worker()]).catch((e) => logger.error(e));
