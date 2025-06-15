@@ -956,7 +956,7 @@ async function handleStickyMessage(event: OmitPartialGroupDMChannel<Message<bool
   )
 }
 
-function worker() {
+function scheduleWorker() {
   logger.info("Worker started");
   const currentTime = new Date().toLocaleTimeString([], {
     hour: "2-digit",
@@ -1050,8 +1050,40 @@ function worker() {
   }, 60 * 1000);
 }
 
+function stickyMessageWorker() {
+
+  setInterval(async () => {
+    const now = Date.now();
+    const updates = [...pendingStickyUpdates.entries()];
+
+    logger.debug(`Worker checking ${updates.length} pending sticky updates`);
+
+    for (const [channelKey, updateData] of updates) {
+      const { message, timestamp, sticky, lastProcessed } = updateData;
+      const lastRun = channelCooldowns.get(channelKey) || lastProcessed;
+
+      if (now - lastRun >= COOLDOWN_MS) {
+        try {
+          logger.info(`Worker processing sticky update for channel ${message.channelId}`);
+
+          channelCooldowns.set(channelKey, now);
+
+          await handleStickyMessage(message);
+
+          pendingStickyUpdates.delete(channelKey);
+
+          logger.info(`Worker completed sticky update for channel ${message.channelId}`);
+        } catch (e) {
+          logger.error(`Worker error processing sticky for channel ${message.channelId}:`, e);
+        }
+      }
+    }
+  }, 2_500);
+}
+
 
 const channelCooldowns = new Map();
+const pendingStickyUpdates = new Map();
 const COOLDOWN_MS = 2_500;
 
 async function main() {
@@ -1092,33 +1124,38 @@ async function main() {
     const channelId = message.channelId;
     const serverId = message.guild?.id;
 
-    logger.info("serverid " + serverId + " channelId " + channelId)
     if (!serverId) return;
 
     const sticky = dbService.getStickyMessage(channelId, serverId)
-    logger.info("channel " + JSON.stringify(sticky))
     if (!sticky) return;
 
     const channelKey = `${serverId}-${channelId}`;
     const now = Date.now();
     const lastRun = channelCooldowns.get(channelKey);
 
-    logger.info("cooldown " + channelCooldowns.values())
+    logger.debug("cooldown " + channelCooldowns.values())
 
     if (lastRun) {
-      logger.info(`Time since last run: ${now - lastRun}ms`);
+      logger.debug(`Time since last run: ${now - lastRun}ms`);
     }
 
     // Skip if within cooldown period
     if (lastRun && (now - lastRun) < COOLDOWN_MS) {
-      logger.info(`Skipping handleStickyMessage for channel ${channelId} - within cooldown`);
+      logger.debug(`Skipping handleStickyMessage for channel ${channelId} - within cooldown`);
       return;
     }
 
     try {
       channelCooldowns.set(channelKey, now);
+      pendingStickyUpdates.set(channelKey, {
+        message,
+        timestamp: now,
+        sticky,
+        lastProcessed: lastRun || 0
+      });
 
       await handleStickyMessage(message);
+      pendingStickyUpdates.delete(channelKey);
     } catch (e) {
       logger.error(e);
     }
@@ -1136,7 +1173,8 @@ async function main() {
 Promise.allSettled(
   [
     main(),
-    worker(),
+    scheduleWorker(),
+    stickyMessageWorker(),
   ]
 )
   .catch((e) => logger.error(e));
