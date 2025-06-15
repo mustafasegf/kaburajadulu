@@ -20,6 +20,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "chrono-node": "^2.8.3",
     "discord.js": "^14.18.0",
     "drizzle-orm": "^0.41.0",
     "pino": "^9.7.0",

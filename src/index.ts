@@ -26,8 +26,9 @@ import { db } from "./db"
 import * as schema from "./schema";
 
 import pino from "pino";
-import { bucket } from "./utils";
+import { bucket, Mutex } from "./utils";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import * as chrono from 'chrono-node';
 
 // Client setup with required intents
 export const client = new Client({
@@ -203,8 +204,6 @@ const commands: Commands[] = [
         memberMap[member.userId] = member
       }
 
-      console.log(memberMap)
-
       const now = new Date()
       if (members) {
         for (const member of members.values()) {
@@ -259,7 +258,7 @@ const commands: Commands[] = [
       const channels = dbService.listChannelFromServerId(interaction.guild!.id)
       const content = channels.map((channel, i) => `${i + 1}. ${channel.channelName}`).join("\n");
 
-      console.log(`Remove tracking from ${channel.name}`)
+      logger.info(`Remove tracking from ${channel.name}`)
 
       await interaction.reply({
         content,
@@ -465,6 +464,10 @@ const commands: Commands[] = [
         interaction.guildId || "unknown",
       )
 
+      if (sticky) {
+        channel.messages.delete(sticky.lastMessageId)
+      }
+
       db.insert(schema.auditLog).values({
         channelId: interaction.channelId,
         // @ts-ignore
@@ -573,7 +576,7 @@ const commands: Commands[] = [
       {
         name: "time",
         description:
-          "Time of the day in 24h format",
+          "Which time to send the message",
         type: ApplicationCommandOptionType.String,
         required: true,
       },
@@ -584,24 +587,26 @@ const commands: Commands[] = [
         type: ApplicationCommandOptionType.Channel,
         required: false,
       },
-      // {
-      //   name: "Repeating",
-      //   description:
-      //     "Should the message repeat everyday",
-      //   type: ApplicationCommandOptionType.String,
-      //   required: false,
-      //   choices: [
-      //     { name: "Daily", value: "Daily" },
-      //     { name: "Weekly", value: "Weekly" },
-      //     // { name: "Monthly", value: "Monthly" },
-      //   ],
-      // }
+      {
+        name: "repeating",
+        description:
+          "How should the message repeat",
+        type: ApplicationCommandOptionType.String,
+        required: false,
+        choices: [
+          { name: "Daily", value: "Daily" },
+          { name: "Weekly", value: "Weekly" },
+          { name: "Monthly", value: "Monthly" },
+          { name: "Final Week Of The Month", value: "Final Week" },
+        ],
+      }
     ],
     defaultMemberPermissions: ["ManageChannels"],
     run: async ({ interaction }) => {
       const message = interaction.options.getString("message")!;
       const time = interaction.options.getString("time")!;
       const channel = interaction.options.getChannel("channel") || interaction.guild?.channels.cache.get(interaction.channelId)!;
+      const repeating = interaction.options.getString("repeating");
 
       if (!channel || "isSendable" in channel && !channel.isSendable()) {
         await interaction.reply({
@@ -611,13 +616,23 @@ const commands: Commands[] = [
         return
       }
 
-      // validate if the time is in 24h format
-      const HOURS_REGEX = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-      if (!HOURS_REGEX.test(time)) {
+      const date = chrono.parseDate(time)
+      if (!date) {
         await interaction.reply({
-          content: "Invalid time format. Please use 24h format.",
+          content: "Invalid time format",
           flags: [MessageFlags.Ephemeral],
         });
+        return;
+      }
+
+      date.setSeconds(0, 0)
+
+      if (date < new Date()) {
+        await interaction.reply({
+          content: "The time can't be in the past",
+          flags: [MessageFlags.Ephemeral],
+        });
+
         return;
       }
 
@@ -629,7 +644,8 @@ const commands: Commands[] = [
           serverId: interaction.guildId || "unknown",
           serverName: interaction.guild!.name,
           message,
-          time,
+          repeating,
+          time: date,
         })
         .returning()
         .get()
@@ -777,8 +793,10 @@ const commands: Commands[] = [
       }
 
       if (schedules.length > 1 && !order) {
+
+        const content = schedules.map((schedule, i) => `${i + 1}. ${schedule.channelName} @(${schedule.time})\n${schedule.message}`).join('\n')
         await interaction.reply({
-          content: "There's more than one scheduled message on this channel. Please add order to the command",
+          content: "There's more than one scheduled message on this channel. Please add order to the command\n" + content,
           flags: [MessageFlags.Ephemeral],
         })
 
@@ -820,16 +838,11 @@ const commands: Commands[] = [
       }).onConflictDoNothing()
         .execute()
 
-      await interaction.reply({
-        content: `Deleted scheduled message on ${schedule?.channelName} @${schedule?.time}}`,
-        flags: [MessageFlags.Ephemeral],
-      })
-
       const content = schedules.filter((_schedule, i) => i != ((order || 1) - 1)).map((schedule, i) => `${i + 1}. ${schedule.channelName} @(${schedule.time})\n${schedule.message}`).join('\n')
 
       if (content) {
         await interaction.reply({
-          content,
+          content: `Deleted scheduled message on ${schedule?.channelName} @${schedule?.time}}\n` + content,
           flags: [MessageFlags.Ephemeral],
         })
       }
@@ -928,7 +941,11 @@ async function handleStickyMessage(event: OmitPartialGroupDMChannel<Message<bool
     return
   }
 
-  channel.messages.delete(message.lastMessageId)
+  try {
+    channel.messages.delete(message.lastMessageId)
+  } catch (e) {
+    logger.error("can't delete message", e)
+  }
 
   const res = await channel.send(message.message)
 
@@ -950,12 +967,8 @@ function worker() {
   // loop all settings in every minute. Check if the time is the same as the current time and send the message
   setInterval(async () => {
 
-    const currentTime = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-
+    const currentTime = new Date()
+    currentTime.setSeconds(0, 0)
     const schedules = db
       .select()
       .from(schema.schedule)
@@ -972,13 +985,74 @@ function worker() {
         continue
       }
 
-      channel.send(schedule.message)
+      await channel.send(schedule.message)
       logger.info(`Sending schedule message to ${schedule.channelName}`)
+
+
+      if (schedule.repeating) {
+        if (schedule.repeating === "Daily") {
+          schedule.time.setDate(schedule.time.getDate() + 1)
+
+          db
+            .update(schema.schedule)
+            .set({ time: schedule.time })
+            .where(eq(schema.schedule.id, schedule.id))
+            .execute()
+        } else if (schedule.repeating === "Weekly") {
+          schedule.time.setDate(schedule.time.getDate() + 7)
+
+          db
+            .update(schema.schedule)
+            .set({ time: schedule.time })
+            .where(eq(schema.schedule.id, schedule.id))
+            .execute()
+        } else if (schedule.repeating === "Monthly") {
+          schedule.time.setMonth(schedule.time.getMonth() + 1)
+
+          db
+            .update(schema.schedule)
+            .set({ time: schedule.time })
+            .where(eq(schema.schedule.id, schedule.id))
+            .execute()
+        } else if (schedule.repeating === "Final Week") {
+          const targetWeekday = schedule.time.getDay();
+
+          // Move to next month
+          schedule.time.setMonth(schedule.time.getMonth() + 1);
+
+          // Get the last day of next month
+          const lastDayOfMonth = new Date(schedule.time.getFullYear(), schedule.time.getMonth() + 1, 0).getDate();
+
+          // Set to last day of the month first
+          schedule.time.setDate(lastDayOfMonth);
+
+          // Calculate how many days to go back to find the last occurrence of target weekday
+          const daysToSubtract = (schedule.time.getDay() - targetWeekday + 7) % 7;
+
+          // Move back to the last occurrence of the target weekday
+          schedule.time.setDate(schedule.time.getDate() - daysToSubtract);
+
+          db
+            .update(schema.schedule)
+            .set({ time: schedule.time })
+            .where(eq(schema.schedule.id, schedule.id))
+            .execute()
+        } else {
+          logger.warn(`Schedule not valid: ${schedule.repeating}`)
+        }
+      } else {
+        db.delete(schema.schedule)
+          .where(eq(schema.schedule.id, schedule.id))
+          .execute()
+      }
     }
 
   }, 60 * 1000);
 }
 
+
+const channelCooldowns = new Map();
+const COOLDOWN_MS = 2_500;
 
 async function main() {
   client.on("ready", async (client) => {
@@ -1015,8 +1089,40 @@ async function main() {
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
 
-    handleStickyMessage(message)
-  })
+    const channelId = message.channelId;
+    const serverId = message.guild?.id;
+
+    logger.info("serverid " + serverId + " channelId " + channelId)
+    if (!serverId) return;
+
+    const sticky = dbService.getStickyMessage(channelId, serverId)
+    logger.info("channel " + JSON.stringify(sticky))
+    if (!sticky) return;
+
+    const channelKey = `${serverId}-${channelId}`;
+    const now = Date.now();
+    const lastRun = channelCooldowns.get(channelKey);
+
+    logger.info("cooldown " + channelCooldowns.values())
+
+    if (lastRun) {
+      logger.info(`Time since last run: ${now - lastRun}ms`);
+    }
+
+    // Skip if within cooldown period
+    if (lastRun && (now - lastRun) < COOLDOWN_MS) {
+      logger.info(`Skipping handleStickyMessage for channel ${channelId} - within cooldown`);
+      return;
+    }
+
+    try {
+      channelCooldowns.set(channelKey, now);
+
+      await handleStickyMessage(message);
+    } catch (e) {
+      logger.error(e);
+    }
+  });
 
   client.on("error", (error: Error) => {
     logger.error("Unexpected error while logging into Discord.");
@@ -1027,4 +1133,10 @@ async function main() {
   client.login(process.env.DC_TOKEN);
 }
 
-Promise.allSettled([main(), worker()]).catch((e) => logger.error(e));
+Promise.allSettled(
+  [
+    main(),
+    worker(),
+  ]
+)
+  .catch((e) => logger.error(e));

@@ -88,7 +88,8 @@ export const schedule = sqliteTable("schedule", {
   serverId: text("server_id").notNull(),
   serverName: text("server_name").notNull(),
   message: text("message").notNull(),
-  time: text("time").notNull(),
+  time: integer("time", { mode: "timestamp" }).notNull(),
+  repeating: text("message"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 })
